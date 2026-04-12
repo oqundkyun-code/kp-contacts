@@ -85,7 +85,23 @@
       transition: background 0.2s;
     }
     .refresh-btn:active { background: rgba(255,255,255,0.35); }
+    .refresh-btn:disabled { opacity: 0.5; cursor: default; }
+    .refresh-btn.spinning { animation: spin 1s linear infinite; }
+    @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
     .cache-info { font-size: 11px; opacity: 0.65; margin-top: 4px; }
+
+    /* ===== Toast ===== */
+    #toast {
+      position: fixed; bottom: calc(env(safe-area-inset-bottom) + 24px);
+      left: 50%; transform: translateX(-50%) translateY(20px);
+      background: rgba(30,30,30,0.92); color: white;
+      padding: 12px 20px; border-radius: 24px;
+      font-size: 14px; font-weight: 500;
+      white-space: nowrap; pointer-events: none;
+      opacity: 0; transition: opacity 0.3s, transform 0.3s;
+      z-index: 9998;
+    }
+    #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 
     /* ===== Standard Header ===== */
     .header {
@@ -349,6 +365,7 @@
   </style>
 </head>
 <body>
+<div id="toast"></div>
 
 <!-- =========================================================
      PASSWORD SCREEN
@@ -372,7 +389,7 @@
         <div class="home-title">📋 施設連絡先一覧</div>
         <div class="home-subtitle">都道府県・市区町村から担当者を検索</div>
       </div>
-      <button class="refresh-btn" onclick="refreshData()" title="データを更新">🔄</button>
+      <button class="refresh-btn" id="refresh-btn" onclick="refreshData()" title="データを更新">🔄</button>
     </div>
     <div class="cache-info" id="cache-info"></div>
   </div>
@@ -540,42 +557,46 @@ async function fetchFromAppsScript(url) {
   return result;
 }
 
-// ── Load all data ─────────────────────────────────────────────
-async function loadData(force = false) {
-  if (!force) {
-    const cached = localStorage.getItem(CACHE_KEY);
-    if (cached) {
-      try {
-        const { data, ts } = JSON.parse(cached);
-        if (Date.now() - ts < CACHE_TTL) {
-          allData = data;
-          document.getElementById('cache-info').textContent =
-            '最終更新: ' + new Date(ts).toLocaleString('ja-JP', { month:'numeric', day:'numeric', hour:'2-digit', minute:'2-digit' });
-          renderHome();
-          return;
-        }
-      } catch(e) { /* ignore */ }
-    }
+// ── Toast ──────────────────────────────────────────────────────
+function showToast(msg, duration = 2800) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(el._tid);
+  el._tid = setTimeout(() => el.classList.remove('show'), duration);
+}
+
+// ── Load all data (起動時: 埋め込みorキャッシュを即表示) ────────
+function loadData() {
+  const cached = localStorage.getItem(CACHE_KEY);
+  if (cached) {
+    try {
+      const { data, ts } = JSON.parse(cached);
+      allData = data;
+      document.getElementById('cache-info').textContent =
+        '最終更新: ' + new Date(ts).toLocaleString('ja-JP', { month:'numeric', day:'numeric', hour:'2-digit', minute:'2-digit' });
+      renderHome();
+      return;
+    } catch(e) { /* fall through to embedded */ }
+  }
+  // キャッシュなし → 埋め込みデータを使用
+  allData = EMBEDDED_DATA;
+  document.getElementById('cache-info').textContent = '内蔵データ（🔄で最新に更新）';
+  renderHome();
+}
+
+// ── Refresh (🔄ボタン: スプレッドシートから最新取得) ────────────
+async function refreshData() {
+  if (!navigator.onLine) {
+    showToast('📵 オフラインです。接続後に再試行してください。', 3500);
+    return;
   }
 
-  document.getElementById('home-body').innerHTML =
-    '<div class="loading-wrap"><div class="spinner"></div><div>データ取得中…</div></div>';
+  const btn = document.getElementById('refresh-btn');
+  btn.classList.add('spinning');
+  btn.disabled = true;
 
-  const appsScriptUrl = localStorage.getItem('apps_script_url') || '';
-
-  if (appsScriptUrl) {
-    // 方法②: Apps Script経由
-    try {
-      allData = await fetchFromAppsScript(appsScriptUrl);
-      const anyOk = Object.values(allData).some(r => r.length > 0);
-      if (!anyOk) throw new Error('no data');
-    } catch(e) {
-      console.error('Apps Script error:', e);
-      renderError();
-      return;
-    }
-  } else {
-    // 方法①: gviz JSONP（公開シート）
+  try {
     const results = await Promise.all(
       SHEETS.map(name =>
         fetchSheet(name)
@@ -584,25 +605,34 @@ async function loadData(force = false) {
       )
     );
 
-    allData = {};
+    const newData = {};
     let anyOk = false;
     for (const r of results) {
       if (r.err) { console.warn(r.name, r.err); continue; }
       const rows = parseSheet(r.data, r.name);
-      if (rows.length) { allData[r.name] = rows; anyOk = true; }
+      if (rows.length) { newData[r.name] = rows; anyOk = true; }
     }
 
-    if (!anyOk) { renderError(); return; }
+    if (!anyOk) {
+      showToast('⚠️ データの取得に失敗しました', 3500);
+      return;
+    }
+
+    allData = newData;
+    const ts = Date.now();
+    try { localStorage.setItem(CACHE_KEY, JSON.stringify({ data: allData, ts })); } catch(e) {}
+    document.getElementById('cache-info').textContent =
+      '最終更新: ' + new Date(ts).toLocaleString('ja-JP', { month:'numeric', day:'numeric', hour:'2-digit', minute:'2-digit' });
+    renderHome();
+    showToast('✅ データを更新しました');
+  } catch(e) {
+    console.error('refresh error:', e);
+    showToast('⚠️ 更新に失敗しました', 3500);
+  } finally {
+    btn.classList.remove('spinning');
+    btn.disabled = false;
   }
-
-  const ts = Date.now();
-  try { localStorage.setItem(CACHE_KEY, JSON.stringify({ data: allData, ts })); } catch(e) {}
-  document.getElementById('cache-info').textContent =
-    '最終更新: ' + new Date(ts).toLocaleString('ja-JP', { month:'numeric', day:'numeric', hour:'2-digit', minute:'2-digit' });
-  renderHome();
 }
-
-function refreshData() { loadData(true); }
 
 // ── Render Home ───────────────────────────────────────────────
 function renderHome() {
