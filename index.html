@@ -518,10 +518,12 @@ function parseSheet(gviz, prefName) {
   const t = gviz && gviz.table;
   if (!t || !t.rows) return rows;
 
-  // Find data-start row (skip prefecture label & header)
+  // 包括シートは先頭列が「中間業者」で、列が1つずれている
+  let isBrokerSheet = false;
   let start = 0;
   for (let i = 0; i < t.rows.length; i++) {
     const c0 = t.rows[i].c?.[0]?.v;
+    if (c0 === '中間業者') { isBrokerSheet = true; start = i + 1; break; }
     if (c0 === '市・区' || c0 === '市区町村' || c0 === '市') { start = i + 1; break; }
   }
 
@@ -533,12 +535,27 @@ function parseSheet(gviz, prefName) {
       const cell = r.c[idx];
       return (cell && cell.v !== null && cell.v !== undefined) ? String(cell.v).trim() : '';
     };
-    const city = cv(0) || lastCity;  // carry forward merged city
-    if (city) lastCity = city;
-    const facility = cv(1), model = cv(2), dept = cv(3),
-          person   = cv(4), tel   = cv(5), fax  = cv(6), mail = cv(7);
-    if (!city && !facility && !dept && !tel) continue;
-    rows.push({ city, facility, model, dept, person, tel, fax, mail, pref: prefName });
+
+    if (isBrokerSheet) {
+      const broker = cv(0);
+      // セクション行（【契約中】【未契約】等）と再ヘッダー行はスキップ
+      if (!broker || broker.startsWith('【') || broker === '中間業者') continue;
+      const city     = cv(1);
+      if (!city) continue;
+      const facility = cv(2), model  = cv(3);
+      const deptSub  = cv(4);
+      const dept     = broker + (deptSub ? '　' + deptSub : '');
+      const person   = cv(5), tel    = cv(6), fax   = cv(7), mail  = cv(8);
+      if (!city && !facility && !dept && !tel) continue;
+      rows.push({ city, facility, model, dept, person, tel, fax, mail, pref: prefName });
+    } else {
+      const city = cv(0) || lastCity;
+      if (city) lastCity = city;
+      const facility = cv(1), model = cv(2), dept = cv(3),
+            person   = cv(4), tel   = cv(5), fax  = cv(6), mail = cv(7);
+      if (!city && !facility && !dept && !tel) continue;
+      rows.push({ city, facility, model, dept, person, tel, fax, mail, pref: prefName });
+    }
   }
   return rows;
 }
