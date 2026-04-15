@@ -546,15 +546,17 @@ function parseSheet(gviz, prefName) {
       const deptSub  = cv(4);
       const dept     = broker + (deptSub ? '　' + deptSub : '');
       const person   = cv(5), tel    = cv(6), fax   = cv(7), mail  = cv(8);
+      const addr     = cv(10);
       if (!city && !facility && !dept && !tel) continue;
-      rows.push({ city, facility, model, dept, person, tel, fax, mail, pref: prefName });
+      rows.push({ city, facility, model, dept, person, tel, fax, mail, addr, pref: prefName });
     } else {
       const city = cv(0) || lastCity;
       if (city) lastCity = city;
       const facility = cv(1), model = cv(2), dept = cv(3),
             person   = cv(4), tel   = cv(5), fax  = cv(6), mail = cv(7);
+      const addr     = cv(9);
       if (!city && !facility && !dept && !tel) continue;
-      rows.push({ city, facility, model, dept, person, tel, fax, mail, pref: prefName });
+      rows.push({ city, facility, model, dept, person, tel, fax, mail, addr, pref: prefName });
     }
   }
   return rows;
@@ -811,6 +813,10 @@ function renderCard(row) {
     const links = row.mail.split(/[,、\s]+/).filter(Boolean)
       .map(m => `<a href="mailto:${m}">${m}</a>`).join('<br>');
     fields += field('MAIL', links);
+  }
+  if (row.addr) {
+    const mapUrl = 'https://maps.google.com/?q=' + encodeURIComponent(row.addr);
+    fields += field('住所', `<a href="${mapUrl}" target="_blank" style="color:var(--primary);text-decoration:none;">📍 ${row.addr}</a>`);
   }
 
   return `
