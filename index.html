@@ -521,10 +521,20 @@ function parseSheet(gviz, prefName) {
   // 包括シートは先頭列が「中間業者」で、列が1つずれている
   let isBrokerSheet = false;
   let start = 0;
+  let addrIdx = -1; // 住所列のインデックス（動的検出）
   for (let i = 0; i < t.rows.length; i++) {
     const c0 = t.rows[i].c?.[0]?.v;
-    if (c0 === '中間業者') { isBrokerSheet = true; start = i + 1; break; }
-    if (c0 === '市・区' || c0 === '市区町村' || c0 === '市') { start = i + 1; break; }
+    if (c0 === '中間業者' || c0 === '市・区' || c0 === '市区町村' || c0 === '市') {
+      if (c0 === '中間業者') isBrokerSheet = true;
+      // このヘッダー行から「住所」列を検出
+      const headerRow = t.rows[i].c || [];
+      for (let j = 0; j < headerRow.length; j++) {
+        const hv = headerRow[j]?.v;
+        if (hv === '住所') { addrIdx = j; break; }
+      }
+      start = i + 1;
+      break;
+    }
   }
 
   let lastCity = '';
@@ -546,7 +556,7 @@ function parseSheet(gviz, prefName) {
       const deptSub  = cv(4);
       const dept     = broker + (deptSub ? '　' + deptSub : '');
       const person   = cv(5), tel    = cv(6), fax   = cv(7), mail  = cv(8);
-      const addr     = cv(10);
+      const addr     = addrIdx >= 0 ? cv(addrIdx) : '';
       if (!city && !facility && !dept && !tel) continue;
       rows.push({ city, facility, model, dept, person, tel, fax, mail, addr, pref: prefName });
     } else {
@@ -554,7 +564,7 @@ function parseSheet(gviz, prefName) {
       if (city) lastCity = city;
       const facility = cv(1), model = cv(2), dept = cv(3),
             person   = cv(4), tel   = cv(5), fax  = cv(6), mail = cv(7);
-      const addr     = cv(9);
+      const addr     = addrIdx >= 0 ? cv(addrIdx) : '';
       if (!city && !facility && !dept && !tel) continue;
       rows.push({ city, facility, model, dept, person, tel, fax, mail, addr, pref: prefName });
     }
